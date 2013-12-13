@@ -19,6 +19,7 @@ import java.util.regex.Pattern;
 
 import javax.swing.JTextArea;
 import javax.swing.SwingWorker;
+import javax.swing.table.DefaultTableModel;
 
 import org.apache.log4j.Logger;
 
@@ -31,7 +32,9 @@ public class TracerouteWorker extends SwingWorker<String, String> {
 	private final String destination;
 	private final String mercuryServerURL;
 	private final JTextArea taTraceroute;
-
+	private final DefaultTableModel model;
+	private int status;
+	private final String sessionId;
 	
 	/**
 	 * Constructor
@@ -40,10 +43,12 @@ public class TracerouteWorker extends SwingWorker<String, String> {
 	 * @param mercuryServerURL
 	 * @param taTraceroute
 	 */
-    public TracerouteWorker(String destination, String mercuryServerURL, JTextArea taTraceroute) {
+    public TracerouteWorker(String destination, String mercuryServerURL, JTextArea taTraceroute, DefaultTableModel model, String sessionId) {
     	this.destination = destination;
     	this.mercuryServerURL = mercuryServerURL; //http://mercury.upf.edu/mercury/api/traceroute/uploadTrace
         this.taTraceroute = taTraceroute;
+        this.model = model;
+        this.sessionId = sessionId;
     }
 	
     /**
@@ -60,11 +65,16 @@ public class TracerouteWorker extends SwingWorker<String, String> {
 	
     /**
      * Task done, SwingWorker calls this method in the event thread.
-     * Here we update the XXXX component
+     * Here we update the table component
      */
     @Override
     protected void done() {
-    	
+    	model.addRow(new String[]{
+    			sessionId,
+    			destination, 
+    			String.valueOf(status),
+    			new Date().toString()
+    		});
     }
 	
     /**
@@ -178,10 +188,13 @@ public class TracerouteWorker extends SwingWorker<String, String> {
 					}
 				}
 				
-				String myIp = InetAddress.getLocalHost().getHostAddress();
-				traceroute = "{\"myIp\":\"" + myIp
-						+ "\",\"destination\":\"" + command[6]
-						+ "\",\"ip\":\"" + firstLine + "\",\"hops\":[" + hops
+				String srcIp = InetAddress.getLocalHost().getHostAddress();
+				String srcName = InetAddress.getLocalHost().getHostName();
+				traceroute = "{\"srcIp\":\"" + srcIp
+						+ "\",\"srcName\":\"" + srcName
+						+ "\",\"sessionId\":\"" + sessionId
+						+ "\",\"dstName\":\"" + command[6]
+						+ "\",\"dstIp\":\"" + firstLine + "\",\"hops\":[" + hops
 						+ "]}";
 			}
 
@@ -226,7 +239,7 @@ public class TracerouteWorker extends SwingWorker<String, String> {
 	private String postData(String data) {
 
 		String result;
-
+		status = 0;
 		try {
 			URL url = new URL(mercuryServerURL);
 			HttpURLConnection connection = (HttpURLConnection) url
@@ -244,7 +257,7 @@ public class TracerouteWorker extends SwingWorker<String, String> {
 			wr.flush();
 			wr.close();
 
-			int status = connection.getResponseCode();
+			this.status = connection.getResponseCode();
 			print("Status: " + status);
 			if ((status == 200) || (status == 201)) {
 				print("Added traceroute data!");

@@ -7,11 +7,14 @@ import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Date;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -29,13 +32,18 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
+import javax.swing.JTabbedPane;
+import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.UIManager.LookAndFeelInfo;
+import javax.swing.table.DefaultTableModel;
 
 import org.apache.log4j.Logger;
+
+import edu.upf.nets.mercury.pojo.TracerouteSession;
 
 
 
@@ -52,14 +60,17 @@ public class App extends JFrame {
 	private static final int POOL_INIT = 10;
 	private Timer timer = new Timer();
 	private String internetAnalyticsURL = "http://inetanalytics.nets.upf.edu/getUrls";
-	private String mercuryURL = "http://mercury.upf.edu/mercury/api/traceroute/uploadTrace";
-	
+	private String mercuryUploadTrace = "http://mercury.upf.edu/mercury/api/traceroute/uploadTrace";
+	private String mercuryAddSession = "http://mercury.upf.edu/mercury/api/traceroute/addTracerouteSession";
+	private String mercuryGetSession = "http://mercury.upf.edu/mercury/api/traceroute/getTracerouteSession/";
 	
 	//GUI components
 	private JMenuBar menuBar;
 	private JMenu menu;
 	private JMenuItem menuItemAbout;
 	private JMenuItem menuItemHelp;
+	
+	private JTabbedPane tabbedPane;
 	
 	private JButton bURLs;
 	private JLabel lURLsServer;
@@ -79,6 +90,16 @@ public class App extends JFrame {
 	
 	private JLabel lParallelTraceroute;
 	private JSlider sParallelTraceroute;
+	
+	
+	private DefaultTableModel model;
+	
+	private JLabel lTracerouteSessionId;
+	private JTextField tfTracerouteSessionId;
+	private JLabel lTracerouteSessionAuthor;
+	private JTextField tfTracerouteSessionAuthor;
+	private JTextArea taTracerouteSessionDescription; 
+	private JTextArea taTracerouteSessionOutput;
 	
 	public static void main(String[] args) {
 		SwingUtilities.invokeLater(new Runnable() {
@@ -102,9 +123,24 @@ public class App extends JFrame {
 			e.printStackTrace();
 		}
 
-    	
+    	//We set the menu bar
     	setJMenuBar(createJMenuBar(this));
     	
+    	//We set the tabs
+    	tabbedPane = new JTabbedPane();
+		tabbedPane.addTab("Main", getMainPanel());
+		tabbedPane.addTab("Log", getLogPanel());
+		tabbedPane.addTab("Session", getSessionPanel());
+	
+		//We set the frame
+		setLookAndFeel();
+		add(tabbedPane);
+		setSize(640, 860);
+		setDefaultCloseOperation(EXIT_ON_CLOSE);
+		setVisible(true);
+    }
+    
+    protected JPanel getMainPanel(){
 		//Here we add the components to a JPanel that will be added to the JFrame
 		JPanel myPanel = new JPanel();
 		myPanel.add(createGetURLsComponents());
@@ -112,15 +148,13 @@ public class App extends JFrame {
 		myPanel.add(createExecuteTracerouteComponents());
 		myPanel.add(createScheduledTracerouteComponents());
 		myPanel.add(createParallelTracerouteComponents());
+		
 		myPanel.add(createTracerouteTextArea());
-	
-
-		setLookAndFeel();
-		add(myPanel);
-		setSize(640, 800);
-		setDefaultCloseOperation(EXIT_ON_CLOSE);
-		setVisible(true);
+		
+		return myPanel;
     }
+    
+
 
     protected JMenuBar createJMenuBar(final JFrame frame) {
     	menuBar = new JMenuBar();
@@ -204,7 +238,7 @@ public class App extends JFrame {
     	JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
     	
 		lMercuryServer = new JLabel("Mercury server:");
-		tfMercuryServer = new JTextField(null, mercuryURL, 30);
+		tfMercuryServer = new JTextField(null, mercuryUploadTrace, 30);
 		bTraceroute = new JButton("execute Traceroute!");
 		bTraceroute.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
@@ -220,6 +254,16 @@ public class App extends JFrame {
     }
     
     protected void executeTraceroute(){
+    	
+    	if(! tfTracerouteSessionId.getText().equals("")){
+    		TracerouteSession tracerouteSession = new TracerouteSession();
+    		tracerouteSession.setSessionId(tfTracerouteSessionId.getText());
+    		tracerouteSession.setAuthor(tfTracerouteSessionAuthor.getText());
+    		tracerouteSession.setDescription(taTracerouteSessionDescription.getText());
+    		tracerouteSession.setDateStart(new Date());
+    		addTracerouteSession(tracerouteSession);
+    	}
+    	
 		//Here we prepare a ThreadPool with X Threads
     	int pool = sParallelTraceroute.getValue();
     	print("Parallel processes: "+pool);
@@ -229,10 +273,16 @@ public class App extends JFrame {
 		for (String destination : destinations) {
 			print(destination);
 			TracerouteWorker tw = new TracerouteWorker(
-					destination, tfMercuryServer.getText(), taTraceroute);
+					destination, 
+					tfMercuryServer.getText(), 
+					taTraceroute, 
+					model, 
+					tfTracerouteSessionId.getText());
 			executorService.submit(tw);
 			//tw.execute(); //We don't need this if we use ThreadPool
 		}
+		
+
     }
     
     protected JComponent createScheduledTracerouteComponents() {
@@ -289,6 +339,9 @@ public class App extends JFrame {
 		return panel;
     }
     
+
+    
+    
     protected JComponent createTracerouteTextArea() {
     	JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
     	
@@ -307,6 +360,115 @@ public class App extends JFrame {
 		return panel;
     }	
     	
+    
+    protected JPanel getLogPanel(){
+		//Here we add the components to a JPanel that will be added to the JFrame
+		JPanel myPanel = new JPanel();
+		myPanel.add(getLogTable());
+		return myPanel;
+    }
+    
+	private JComponent getLogTable(){
+
+		model = new DefaultTableModel();
+		model.setColumnIdentifiers(new String[]{"session id","destination","result","timestamp"});
+		//model.addRow(new String[]{"hola","adios","hello","bye"});
+		JTable table = new JTable(model);
+		//tableLatency.update(tableLatency.getGraphics());
+		JScrollPane spTable = new JScrollPane(table);
+		spTable.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
+		spTable.setPreferredSize(new Dimension(480, 640));
+		spTable.setBorder(BorderFactory.createTitledBorder("Results"));
+
+		JPanel myPanel = new JPanel();
+		myPanel.add(spTable);
+		
+		return myPanel;
+	}
+	
+	
+    protected JPanel getSessionPanel(){
+		//Here we add the components to a JPanel that will be added to the JFrame
+		JPanel myPanel = new JPanel();
+		myPanel.add(createTracerouteSessionComponent1());
+		myPanel.add(createTracerouteSessionComponent2());
+		myPanel.add(createTracerouteSessionComponent3());
+		myPanel.add(createTracerouteSessionComponent4());
+		myPanel.add(createTracerouteSessionComponent5());
+		return myPanel;
+    }
+	
+    protected JComponent createTracerouteSessionComponent1() {
+    	
+    	
+    	JPanel panel1 = new JPanel(new FlowLayout(FlowLayout.TRAILING));
+		lTracerouteSessionId = new JLabel("Session Id:");
+		tfTracerouteSessionId = new JTextField(null, "", 30);
+		JButton bGenTracerouteSessionId = new JButton("Generate Session Id");
+		bGenTracerouteSessionId.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent arg0) {
+				UUID sessionId = UUID.randomUUID();
+				tfTracerouteSessionId.setText(sessionId.toString());
+			}
+		});
+		panel1.add(lTracerouteSessionId);
+		panel1.add(tfTracerouteSessionId);
+		panel1.add(bGenTracerouteSessionId);
+
+
+		
+		return panel1;
+    }
+    
+    protected JComponent createTracerouteSessionComponent2() {
+    	JPanel panel2 = new JPanel(new FlowLayout(FlowLayout.TRAILING));
+		lTracerouteSessionAuthor = new JLabel("Author:");
+		tfTracerouteSessionAuthor = new JTextField(null, "", 20);
+		panel2.add(lTracerouteSessionAuthor);
+		panel2.add(tfTracerouteSessionAuthor);
+		
+		return panel2;
+    }
+    
+    protected JComponent createTracerouteSessionComponent3() {
+		JPanel panel3 = new JPanel(new FlowLayout(FlowLayout.TRAILING));
+		taTracerouteSessionDescription = new JTextArea();
+		JScrollPane spTracerouteSessionDescription = new JScrollPane(taTracerouteSessionDescription);
+		spTracerouteSessionDescription.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
+		spTracerouteSessionDescription.setPreferredSize(new Dimension(480, 280));
+		spTracerouteSessionDescription.setBorder(BorderFactory.createTitledBorder("Description"));
+		panel3.add(spTracerouteSessionDescription);
+		
+		return panel3;
+    }
+    
+    protected JComponent createTracerouteSessionComponent4() {
+		JPanel panel4 = new JPanel(new FlowLayout(FlowLayout.CENTER));
+		JButton bTracerouteSessionId = new JButton("Get Session Id");
+		bTracerouteSessionId.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent arg0) {
+		    	if(! tfTracerouteSessionId.getText().equals("")){
+		    		String data = getTracerouteSession(tfTracerouteSessionId.getText());
+		    		taTracerouteSessionOutput.append(data);
+		    	}
+			}
+		});
+		panel4.add(bTracerouteSessionId);
+		
+    	return panel4;
+    }
+    
+    protected JComponent createTracerouteSessionComponent5() {
+		JPanel panel5 = new JPanel(new FlowLayout(FlowLayout.TRAILING));
+		taTracerouteSessionOutput = new JTextArea();
+		JScrollPane spTracerouteSessionOutput = new JScrollPane(taTracerouteSessionOutput);
+		spTracerouteSessionOutput.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
+		spTracerouteSessionOutput.setPreferredSize(new Dimension(480, 320));
+		spTracerouteSessionOutput.setBorder(BorderFactory.createTitledBorder("Output"));
+		panel5.add(spTracerouteSessionOutput);
+		
+    	return panel5;
+    }
     
     
     
@@ -362,7 +524,84 @@ public class App extends JFrame {
 		return URLs;
 	}
     
+	
+	private int addTracerouteSession(TracerouteSession tracerouteSession){
+		int status = 0;
+		try{
+
+			URL url = new URL(mercuryAddSession);
+			HttpURLConnection connection = (HttpURLConnection) url
+					.openConnection();
+			connection.setRequestMethod("POST");
+			connection.setDoInput(true);
+			connection.setDoOutput(true);
+
+			connection.setRequestProperty("Content-Type",
+					"application/json;charset=UTF-8");
+
+			DataOutputStream wr = new DataOutputStream(
+					connection.getOutputStream());
+			String data = tracerouteSession.toJsonString(); 
+			wr.write(data.getBytes("UTF-8"));
+			wr.flush();
+			wr.close();
+
+			
+			status = connection.getResponseCode();
+			if ((status == 200) || (status == 201)) {
+				//read the result from the server
+				BufferedReader rd  = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+				String line = null;
+				StringBuilder sb = new StringBuilder();
+		        while (( line = rd.readLine()) != null) {
+		        	sb.append(line);
+		        }
+		        print(sb.toString());
+			} else {
+				print("Status: " + status);
+			}
+			connection.disconnect();
+			return status;
+			
+		} catch(Exception e){
+			return status;
+		}
+	}
     
+	
+	private String getTracerouteSession(String sessionId){
+		String data = "";
+		try{
+
+			URL url = new URL(mercuryGetSession+sessionId);
+			HttpURLConnection connection = (HttpURLConnection) url
+					.openConnection();
+			connection.setRequestMethod("GET");
+			connection.setDoInput(true);
+			connection.setDoOutput(true);
+			
+			int status = connection.getResponseCode();
+			if ((status == 200) || (status == 201)) {
+				//read the result from the server
+				BufferedReader rd  = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+				String line = null;
+				StringBuilder sb = new StringBuilder();
+		        while (( line = rd.readLine()) != null) {
+		        	sb.append(line);
+		        }
+		        data = sb.toString();
+			} else {
+				print("Status: " + status);
+				data = "{\"status\":\""+status+"\"}";
+			}
+			connection.disconnect();
+			
+		} catch(Exception e){
+			data = "{\"status\":\"0\"}";
+		}
+		return data;
+	}
+	
     private void print(String msg, Object... args) {
         log.info(String.format(msg, args));
     }
